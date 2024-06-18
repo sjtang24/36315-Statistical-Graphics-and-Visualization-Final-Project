@@ -1,0 +1,479 @@
+---
+title: "Remembering Rio 2016"
+author: 
+  - "Max Liu, Steven Tang, Uma Pradeepan"
+  - "sjtang, maxliu, upradeep"
+institute: "Carnegie Mellon University"
+date: "`r Sys.Date()`"
+output:
+  xaringan::moon_reader:
+    css: ["xaringan-themer.css"]
+    seal: false
+    lib_dir: libs
+    nature:
+      highlightStyle: github
+      highlightLines: true
+      countIncrementalSlides: false
+---
+
+```{r setup, include=FALSE}
+library(kableExtra)
+library(tidyverse)
+
+options(knitr.kable.NA = '')
+options(htmltools.dir.version = FALSE, htmltools.preserve.raw = FALSE)
+knitr::opts_chunk$set(fig.retina = 3, 
+                      warning = FALSE, 
+                      message = FALSE,
+                      echo = FALSE,
+                      fig.path = "figs/")
+```
+
+```{r xaringan-themer, include=FALSE, warning=FALSE}
+
+library(xaringanthemer)
+
+style_mono_light(base_color = "#57B52F")
+
+```
+
+```{r}
+# Loading in needed libraries
+library(tidyverse)
+library(ggtext)
+library(ggExtra)
+library(ggrepel)
+library(gghighlight)
+library(ggridges)
+library(cowplot)
+library(gt)
+library(scales)
+library(paletteer)
+library(ggalt)
+
+# Defining custom theme for the document
+rio_theme <- function() {
+  theme_bw() %+replace%
+    theme(legend.position = "none",
+          strip.text = element_text(color = "white", size = 10, face = "bold",
+                                    margin = margin(5,5,5,5)),
+          strip.background = element_rect(color = "black", fill = "black"),
+          axis.ticks = element_blank(),
+          axis.title = element_text(face = "bold"),
+          plot.title.position = "plot",
+          plot.title = element_text(hjust = 0, face = "bold", size = 16,
+                                    margin = margin(2,2,2,2)),
+          plot.subtitle = element_text(face = "italic", hjust = 0, size = 14,
+                                       margin = margin(2,2,2,2)))
+}
+
+# Reading in datasets used in document (downloaded from https://www.kaggle.com/rio2016/olympic-games?select=events.csv)
+countries <- readr::read_csv("../dataset/countries.csv")
+athletes <- readr::read_csv("../dataset/athletes.csv")
+
+medals.by.country <- athletes %>% 
+  mutate(nationality = if_else(nationality == "SRB", "SCG", nationality)) %>% 
+  group_by(nationality) %>% 
+  summarize(gold = sum(gold),
+            silver = sum(silver),
+            bronze = sum(bronze),
+            total = gold + silver + bronze) %>% 
+  left_join(countries, by = c("nationality" = "code")) %>% 
+  pivot_longer(gold:bronze, names_to = "medal_type", values_to = "count") %>%
+  group_by(country) %>% 
+  mutate(total = sum(count)) %>% 
+  ungroup() %>% 
+  mutate(country_label = paste0(country, " (", total, " medals)"),
+         medal_type = factor(medal_type, levels = c("bronze", "silver", "gold"), 
+                             labels = c("Bronze", "Silver", "Gold")))
+```
+
+class: inverse, center, middle
+
+# Remembering Rio 2016
+
+### Uma Pradeepan, Max Liu, and Steven Tang
+
+### July 1st, 2021
+
+
+```{r, echo = FALSE, out.height = 190, out.width=150}
+#knitr::include_graphics("rio16.png")
+```
+
+---
+
+# Introduction to the Dataset
+
++ "Rio 2016" data set on Kaggle
+  - ~10k athletes and 300 events
++ Three files
+  - `athletes.csv`
+  - `countries.csv`
+  - `events.csv` 
++ Explore how physical and social qualities affect performance
+
+---
+
+class: center, middle
+
+# Focus #1
+
+### Diving into GDP per Capita and Medal Count
+
+```{r, echo = FALSE, out.height = 303, out.width = 455}
+#knitr::include_graphics("riomedals.png")
+```
+
+---
+
+# We'd like to know
+--
+
+  + Medal distribution by country and type
+  
+--
+
+  + Proportion of medal-winning countries having Gold, Silver, or Bronze as their most abundant winning
+  
+--
+
+  + Distribution of medals and GDP per capita
+  
+--
+
+  + Their relationship
+  
+--
+
+  + What are the GDP's per Capita for the Top 10 Countries by Total Number of Medals Won?
+
+---
+
+# US Won the Most (Gold) Medals
+
+```{r, echo = FALSE, fig.width = 10, fig.align = "center"}
+medals.by.country %>% 
+  filter(total > 30) %>% 
+  select(-c(population:gdp_per_capita)) %>% 
+  ggplot(aes(y = reorder(country_label, total), x = count, fill = medal_type)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_fill_manual(values = c("#775e39", "#C0C0C0", "#e9af4e")) +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.1)),
+                     breaks = seq(0, 150, 10)) +
+  labs(title = "The US, Germany, and UK Led the World in Medals",
+       subtitle = "<span style = 'color:#e9af4e;'>**Gold**</span>, <span style = 'color:#C0C0C0;'>**Silver**</span>, and <span style = 'color:#775e39;'>**Bronze**</span> medals won by each country",
+       x = "Number of Medals") + 
+  rio_theme() +
+  theme(plot.subtitle = element_markdown(),
+        axis.title.y = element_blank(),
+        axis.text.y = element_text(face = "bold"),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank())
+```
+
+---
+
+# About Half Had More Bronze
+
+```{r, echo = FALSE, fig.width = 10, fig.align = "center"}
+athletes %>% 
+  pivot_longer(gold:bronze, names_to = "medal_type", values_to = "num_medals") %>% 
+  group_by(nationality, medal_type) %>% 
+  summarize(country_type = sum(num_medals)) %>% 
+  group_by(nationality) %>% 
+  mutate(max_num = max(country_type),
+         total_medals = sum(country_type),
+         medal = case_when(medal_type == "gold" ~ 1, medal_type == "silver" ~ 2,
+                           medal_type == "bronze" ~ 3),
+         medal_type = factor(medal_type, levels = c("bronze", "silver", "gold"), 
+                             labels = c("Bronze", "Silver", "Gold"))) %>% 
+  arrange(nationality, medal) %>% 
+  filter(max_num > 0 & country_type == max_num) %>% 
+  filter(medal == max(medal)) %>% 
+  ungroup() %>% 
+  add_count(medal_type) %>% 
+  select(medal_type, n) %>% 
+  unique() %>%
+  mutate(label_name = paste0(medal_type, "\n(", n, " countries)")) %>% 
+  ggplot(aes(x = "", y = n, fill = medal_type)) +
+  geom_bar(stat = "identity") +
+  coord_polar("y", start = 0) + 
+  geom_label_repel(aes(label = label_name), position = position_stack(vjust = 0.5),
+            color = "white", fontface = "bold") + 
+  scale_fill_manual(values = c("#775e39", "#C0C0C0", "#e9af4e")) +
+  theme_void() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+        legend.position = "none") +
+  labs(title = "Most Countries that Won Medals Had the Most Bronze Medals")
+```
+
+---
+
+# GDP per Capita vs Medals Won
+
+```{r, echo = FALSE, fig.width = 10, fig.align = "center"}
+plt <- medals.by.country %>%
+  group_by(country) %>% 
+  filter(count == max(count, na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  mutate(top5host_named = if_else(total > 100, country, NA_character_)) %>% 
+  ggplot(aes(x = gdp_per_capita, y = total)) +
+  geom_point(alpha = 0.5) +
+  gghighlight(gdp_per_capita > 20000) + 
+  geom_label_repel(aes(label = top5host_named)) +
+  scale_x_continuous(labels = scales::label_number_si(), breaks = seq(0, 90000, 10000)) +
+  scale_y_continuous(breaks = seq(0, 250, 50)) + 
+  scale_color_manual(values = c("blue", "red")) +
+  labs(x = "GDP per Capita (in US Dollars)", y = "Total Medals Won",
+       title = "Countries with higher GDP per capita have more Olympic medals") +  
+  rio_theme() +
+  theme(panel.grid.minor.x = element_blank())  
+
+ggMarginal(plt, type = "density", fill = "#57B52F", color = "#2B9935", alpha = 0.5) 
+```
+
+---
+
+class: center, middle
+
+# Focus #2
+
+### Male and Female Athletes and GDP per Capita
+
+---
+
+# We'd like to know
+--
+
+  + Do Men or Women Perform Better in the Top Ten Gold Medal Earning Countries?
+
+  
+--
+
+  + What are the GDP's per Capita for the Top 10 Countries by Total Number of Medals Won?
+
+---
+
+# GDP per Capita
+
+```{r}
+top_10_countries <- athletes %>%
+  group_by(nationality) %>%
+  summarize(total_gold = sum(gold, na.rm = TRUE) + sum(silver, na.rm = TRUE) + sum(bronze, na.rm = TRUE)) %>%
+  top_n(n = 10)
+top_10_countries <- top_10_countries$nationality
+```
+
+```{r, fig.width = 10, fig.align = "center"}
+countries %>%
+  filter(code %in% top_10_countries) %>%
+  mutate(country = as.character(country)) %>%
+  select(country, gdp_per_capita) %>%
+  arrange(desc(gdp_per_capita)) %>%
+  distinct() %>%
+  gt() %>%
+  tab_header(title = md("**GDP per Capita by Country**")) %>%
+  data_color(columns = gdp_per_capita,
+             colors = col_numeric(paletteer_d(
+               palette = "ggsci::green_material") %>% as.character(),
+               domain = NULL)) %>%
+  cols_label(country = "Country", gdp_per_capita = "GDP per Capita (2016 USD)")
+```
+
+---
+
+### GDP per Capita Doesn't Affect Difference Between Male and Female Performance
+
+```{r, fig.width = 8, fig.align = "center"}
+athletes %>%
+  filter(nationality %in% top_10_countries) %>%
+  left_join(countries %>% mutate(nationality = code), by = c("nationality")) %>%
+  mutate(country = as.character(country)) %>%
+  group_by(sex, country) %>%
+  summarize(total_gold = sum(gold, na.rm = TRUE)) %>%
+  pivot_wider(names_from = sex, values_from = total_gold, id_cols = c("country")) %>%
+  ggplot(aes(x = female, xend = male, y = reorder(country, male))) +
+  geom_dumbbell(colour_x = "#f8b195", colour_xend = "#c06c84", size = 1.5) +
+  labs(title = "Number of Gold Medals Won by <span style = 'color:#f8b195;'>**Female**</span> and <span style = 'color:#c06c84;'>**Male**</span> Athletes, by Country ",
+       x = "Medals Won",
+       y = "Country") + 
+  rio_theme() + 
+  theme(plot.title = element_markdown())
+
+```
+
+---
+
+### GDP per Capita Doesn't Affect Difference Between Male and Female Performance
+
+```{r, fig.width = 8, fig.align = "center"}
+athletes %>%
+  left_join(countries %>% mutate(nationality = code), by = c("nationality")) %>%
+  group_by(gdp_per_capita, sex) %>%
+  summarize(total_medals = sum(gold, na.rm = TRUE) + sum(silver, na.rm = TRUE) + sum(bronze, na.rm = TRUE)) %>%
+  pivot_wider(names_from = sex, values_from = total_medals, id_cols = c("gdp_per_capita")) %>%
+  mutate(medal_difference_sex = male - female) %>%
+  ggplot(aes(x = gdp_per_capita, y = medal_difference_sex)) +
+  geom_point() + 
+  labs(title = "Difference in Medals Won by Male and Female Athletes, By GDP Per Capita",
+       x = "GDP Per Capita (2016 USD)",
+       y = "Difference in Medals Won by Men and Women") +
+  rio_theme()
+```
+
+
+---
+
+class: center, middle
+
+# Focus #3
+
+### Height and Weight Distributions by Sport
+
+---
+
+# We'd like to know
+--
+
+  + What are the Height Distributions and Weight Distributions for each Sport?
+
+  
+--
+
+  + How does each sport break down in terms of player count?
+  
+--
+
+  +  How does Number of Participants in the Sport Relate to the Observed Height and Weight Distributions?
+  
+---
+
+# Height/Weight by Sport
+
+```{r, echo = FALSE, fig.width = 10, fig.align = "center"}
+sports = c("weightlifting", "basketball", "rowing", "fencing")
+
+height <- athletes %>% 
+  select(height, sport) %>% 
+  filter(sport %in% sports,
+         !is.na(height)) %>% 
+  ggplot(aes(x = height, y = sport, fill = sport)) +
+  geom_density_ridges(alpha = 0.6, rel_min_height = 0.01) +
+  coord_cartesian(expand = FALSE) +
+  scale_x_continuous(limits = c(1.3, 2.25)) +
+  scale_fill_brewer(palette = "Pastel2", guide = "none") +
+  theme(panel.background = element_blank(),
+        panel.grid.major.x = element_line(color = "grey90", size = 0.2),
+        panel.grid.major.y = element_line(color = "grey90", size = 0.2),
+        axis.ticks = element_blank(),
+        axis.title.y = element_blank()) +
+  labs(title = "Height by sport",
+       x = "height (m)",
+       fill = "sport")
+
+weight <- athletes %>% 
+  select(weight, sport) %>% 
+  filter(sport %in% sports,
+         !is.na(weight)) %>% 
+  ggplot(aes(x = weight, y = sport, fill = sport)) +
+  geom_density_ridges(alpha = 0.6, rel_min_height = 0.01) +
+  coord_cartesian(expand = FALSE) +
+  scale_x_continuous(limits = c(30, 180)) +
+  scale_fill_brewer(palette = "Pastel2", guide = "none") +
+  theme(panel.background = element_blank(),
+        panel.grid.major.x = element_line(color = "grey90", size = 0.2),
+        panel.grid.major.y = element_line(color = "grey90", size = 0.2),
+        axis.ticks = element_blank(),
+        axis.title.y = element_blank()) +
+  labs(title = "Weight by sport",
+       x = "weight (kg)",
+       fill = "sport")
+
+plots <- plot_grid(height, weight, align = "h")
+
+title <- ggdraw() + 
+  draw_label("Each sport has different optimal height and weight distributions",
+    fontface = 'bold',
+    x = -0.75,
+    hjust = -1.5)
+
+plot_grid(title, plots, ncol = 1, rel_heights = c(0.1, 1))
+```
+
+---
+
+# Participants by Sport
+
+```{r, echo = FALSE, fig.width = 10, fig.align = "center"}
+athletes %>% 
+  select(name, sport) %>% 
+  filter(sport %in% sports) %>% 
+  count(sport) %>%
+  mutate(label = paste0(sport, "\n(", n, " athletes)")) %>% 
+  ggplot(aes(x="", y = n, fill = sport)) +
+  geom_bar(stat = "identity", width = 1, color = "black") +
+  coord_polar("y", start = 0) +
+  geom_label_repel(aes(label = label), 
+                   position = position_stack(vjust = 0.5),
+                   size = 3) +
+  scale_fill_brewer(palette = "Pastel2", guide = "none") +
+  theme_void() +
+  theme(legend.position = "none", 
+        plot.title = element_text(hjust = 0.5)) +
+  labs(title = "Sports by player count")
+```
+
+---
+
+# Height-Weight Combo by Sport
+
+```{r, echo = FALSE, fig.width = 10, fig.align = "center"}
+athletes %>% 
+  select(height, weight, sport) %>% 
+  filter(sport %in% sports,
+         !is.na(weight), !is.na(height)) %>% 
+  ggplot(aes(x = weight, y = height, color = sport)) +
+  geom_point(alpha = 1, size = 0.75) +
+  scale_color_brewer(palette = "Pastel2") +
+  rio_theme() +
+  theme(legend.position = c(0.85, 0.2), 
+        legend.title = element_blank(),
+        legend.background = element_blank()) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(title = "Weightlifters players are disproportionately heavy", x = "weight (kg)", y = "height (m)")
+```
+---
+
+# Conclusion
+
+## Summary
+
++ Higher GDP tend to have more total medal
++ GDP per capita doesn't correlate with medals won by male and female athletes
++ Sports have different ideal height-weight distributions
+
+---
+
+# Conclusion
+
+## Limitation, Additional Data, and Future Steps
+
+ + Count medals by athletes but not by event, which measures the countries' success during the Olympics better
+ + Cannot compare with winter sports
+ + Older Olympics that allows to show time series
+ + More insights about the venues
+ + Seeing how investments in teams affects performance
+
+--- 
+
+
+---
+
+class: inverse, center, middle
+
+# Thank you for listening!
+
+```{r, echo = FALSE, out.height = 380, out.width=300}
+#knitr::include_graphics("rio16.png")
+```
